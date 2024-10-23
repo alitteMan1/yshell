@@ -1,0 +1,1 @@
+/usr/bin/cc -g CMakeFiles/yshell.dir/shell.c.o CMakeFiles/yshell.dir/built_in.c.o -o yshell 
