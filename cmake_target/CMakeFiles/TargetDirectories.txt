@@ -1,3 +1,0 @@
-/home/lty/yshell/cmake_target/CMakeFiles/yshell.dir
-/home/lty/yshell/cmake_target/CMakeFiles/edit_cache.dir
-/home/lty/yshell/cmake_target/CMakeFiles/rebuild_cache.dir
