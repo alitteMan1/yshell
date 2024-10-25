@@ -20,9 +20,12 @@ int cd(char ** argv){
         chdir(pswd->pw_dir);
     }
     else{
-        chdir(argv[1]);
+        if(chdir(argv[1]) == -1){
+            printf("yshell: cd: %s: ",argv[1]);
+            fflush(stdout);
+            perror("");
+        }
     }
-    int i=0;
     return 0;
 }
 
