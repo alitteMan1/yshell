@@ -1,7 +1,8 @@
 #include <unistd.h>
+#include <stdlib.h>
 #include "built_in.h"
 
-const char* built_in_cmd[] = {"pwd", "cd", NULL};
+const char* built_in_cmd[] = {"pwd", "cd","exit",  NULL};
 //int hash[] = {1,2,0};
 
 int pwd(char** argvs){
@@ -45,6 +46,7 @@ int parse_builtin_cmd(char ** argv){
         switch (i){
         case 0:   pwd(argv);    break;
         case 1:   cd(argv);     break;
+        case 2:   exit(0);      break;
         default:                break;
         }
         return 1;
