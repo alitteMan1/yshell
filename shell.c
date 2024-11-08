@@ -1,35 +1,34 @@
+
+#define _POSIX_C_SOURCE 200809L
+#define _XOPEN_SOURCE 700
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <fcntl.h>
-#include <sys/wait.h>
+#include <sys/types.h>
 #include <signal.h>
+#include <sys/wait.h>
+//#include <sys/sem.h>  
+//#include <asm/signal.h>
 #include "built_in.h"
-
 //#define DEBUG
 #define MAX_ARGS 40
 #define MAX_CMD_NUM 10
+
 /******************************
  * TODO: 管道 输入输出重定向  中断  jobs  
  * 
  * @author:lity
  * 
- * 
- * 
- * 
- * 
- * 
- * 
- * 
- * 
- * 
- * 
- * 
  */
 
+job_list *current_job;
 int redirc_fp;
 int current_cmd_nums;
+int iscontinue = 0;
+
 int promt_and_get_input(const char* promt, char **line, size_t* len);
 int parse_cmd(const char * cmd, int num, int(*pipes)[2]);
 int get_nums(const char* line);
@@ -40,6 +39,24 @@ int split_line_by_pipe(const char *line,char* cmd[]);
 int check_null_cmd(char* cmd);
 
 
+//SIGINT,SINGTTOU处理信号
+void int_sigin_out(int sig){
+    switch (sig){
+    case SIGTTIN:
+        printf("SIGTTIN\n");
+        signal(SIGTTIN, int_sigin_out);
+        break;
+    case SIGTTOU:
+        printf("SIGTTOU\n");
+        signal(SIGTTOU, int_sigin_out);
+        break;
+    default:
+        break;
+    }
+    
+}
+
+//中断处理信号 ctrl c
 void int_res(int sig){
     char work_dir[1024];
     if (getcwd(work_dir,1024) == NULL){
@@ -48,14 +65,89 @@ void int_res(int sig){
     printf("\n");
     printf("\033[1;35myshell:\033[36m%s\033[0m$ ",work_dir);
     fflush(stdout);
-   // printf("int:%d\n",sig);
+    if(-1==signal(SIGINT,int_res)){
+        perror("signal error\n");
+    }
+    printf("int:%d\n",sig);
 }
 
+void ctrlz(int sig){
+    printf("ctrl z\n");
+    signal(SIGTSTP, ctrlz);
+}
 
+    #define ASD (void(*)())-1
 
-/* shell 主函数 */ 
+void sigcont(int sig){
+    printf("continue\n");
+    signal(SIGCONT,sigcont);
+}
+
+void sigchild(int sig){
+     printf("parents recives a SIGCHLD signal\n");
+    //  if(-1 == tcsetpgrp(STDIN_FILENO,getpid())) {
+    //     perror("tc set failuer");
+    //    }
+    //     else{
+    //         printf("pid:%d,gid:%d\n",getpid(),getgid());
+    //    }
+    int status;
+    int waitid;
+    while((waitid = waitpid(-1,&status,WNOHANG | WUNTRACED | WCONTINUED)) > 0){
+        printf("sigchil wait id:%d groupid:%d\n",waitid, __getpgid(waitid));
+        if(WIFEXITED(status)){
+            iscontinue = 1;   
+            printf("exit normally:");
+            printf("pid:%d,gpid:%d\n",getpid(),__getpgid(waitid));
+            tcsetpgrp(STDIN_FILENO,getpid());
+        
+        }else  if(WIFSIGNALED(status)){
+            printf("exit for uncaptured signal\n");
+            tcsetpgrp(STDIN_FILENO,getpid());
+            iscontinue = 1;
+        }else if(WIFSTOPPED(status)){
+            printf("stoped :%d\n",WSTOPSIG(status));
+            tcsetpgrp(STDIN_FILENO,getpid());
+            iscontinue = 1;
+        }else if(WIFCONTINUED(status)){
+            printf("SIGCONTTTTTTTT\n");
+            // if(tcsetpgrp(STDIN_FILENO,getpid())== -1)   {
+            //     perror("tcsetpgrp error");
+            // }
+          //  iscontinue = 0;
+        }else{
+            printf("unknow status:%d\n",status);
+        }
+    }
+
+ 
+    if(signal(SIGCHLD, sigchild) == SIG_ERR){
+        perror("signal  child error\n");
+    }
+      printf("waitpid:%d\n",waitid);
+//   if(WIFCONTINUED(status))        
+//         printf("SIGCONTTTTTTTT\n");
+
+   return ;
+}
+/* link statou */ 
 int main(){
-    signal(SIGINT,int_res);
+    signal(SIGTTIN, SIG_IGN);
+    signal(SIGTTOU, SIG_IGN);               
+    current_job = (job_list*)malloc(sizeof(job_list));
+    if(signal(SIGINT,int_res) == SIG_ERR){
+        perror("SIGINT!");
+    }
+
+    if(signal(SIGTSTP, ctrlz)==SIG_ERR){
+          perror("SIGTERM!");
+    }
+    if(signal(SIGCONT, sigcont)==SIG_ERR){
+          perror("SIGCONT!");
+    }
+     if(signal(SIGCHLD, sigchild)==SIG_ERR){
+          perror("SIGCHID!");
+    }
     char* line = NULL;
     size_t len;
     while(promt_and_get_input("yshell:", &line, &len) > 0){
@@ -68,6 +160,7 @@ int main(){
          * 
          */
       //      signal(1,);
+        iscontinue = 0;
         char *cmd[MAX_CMD_NUM];
         current_cmd_nums = split_line_by_pipe(line,cmd);
         if(current_cmd_nums == -1)  continue;
@@ -134,7 +227,43 @@ int parse_cmd(const char * cmd, int num, int(*pipes)[2]){
     if(redir_status == -1)
         return -1;
     if(!parse_builtin_cmd(argv)){      
-         exec_program(argv,num,pipes);
+         pid_t cpid = exec_program(argv,num,pipes);
+         
+        
+         job_list * newnode = (job_list*)malloc(sizeof(job_list));
+         if(!newnode){
+            printf("newnode alloc faliure\n");
+         }
+        newnode->job.pid=cpid;
+        newnode->job.stat = 'r';
+        newnode->job.cmd = cmd;
+        newnode->next = NULL;
+       // EACCES
+            if(-1 == setpgid(newnode->job.pid,0))
+               perror("setpid");
+            else{
+                //printf("success\n");
+                if(-1 == tcsetpgrp(STDIN_FILENO,cpid)){
+                    perror("set tc error");
+                }
+               }
+
+        // if(!current_job){
+        //     current_job = newnode;
+        // }
+        // else{
+        //     job_list *p = current_job; 
+        //     while(p->next){
+        //         p = p->next;
+        //     }
+        //     p->next = newnode;
+
+        // }
+         job_list *p = current_job; 
+            while(p->next){
+                p = p->next;
+            }
+            p->next = newnode;
          if(pipes){
             if(num>0)
                 close(pipes[num-1][0]);
@@ -145,8 +274,17 @@ int parse_cmd(const char * cmd, int num, int(*pipes)[2]){
          }
             //close(pipes[0][1]);
         //close(pipes[0][0]);
-         wait(NULL);
+        // wait(NULL);
+        
+       
+        // printf("main process wait id:%d groupid:%d\n",waitid, __getpgid(waitid));
+
+        jobs(current_job);
     }
+    printf("iscontinue:%d\n",iscontinue);
+    while(!iscontinue){
+            
+        }
     
     if(redir_status){
         dup2(redir_status,1);
@@ -213,12 +351,13 @@ void split_cmd(const char *cmd, char **argv){
 __pid_t exec_program(char** argv, int num , int(*pipes)[2]){
     __pid_t child = fork();
     if(child){              //parent 
+        
         if(child < 0){
             printf("fork failure\n");
             exit(0);
         }
         else{
-            
+            printf("parent pid:%d, gpid %d\n", getpid(),getpgrp());
             return child;
         }
     }
@@ -236,6 +375,8 @@ __pid_t exec_program(char** argv, int num , int(*pipes)[2]){
         // printf("out_bak:%d\n",fp);
        
         //pipes
+        
+        printf("child pid:%d, gpid %d\n", getpid(),getpgrp());
             if(pipes != NULL){
                 if(num>0)
                     dup2(pipes[num-1][0],0);
